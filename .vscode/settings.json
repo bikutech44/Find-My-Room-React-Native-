@@ -1,0 +1,8 @@
+{
+    "workbench.startupEditor": "none",
+    "window.restoreWindows": "all",
+    "files.hotExit": "onExitAndWindowClose",
+    "chat.promptFilesRecommendations": {
+
+    }
+}

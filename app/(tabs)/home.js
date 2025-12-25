@@ -1,0 +1,914 @@
+import { View, Text, StyleSheet, Keyboard, Image, Platform, ScrollView, TextInput, Dimensions, Animated, ActivityIndicator, Pressable, KeyboardAvoidingView, } from 'react-native';
+import React, { useEffect, useState, useRef, useCallback } from 'react';
+import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { StatusBar } from 'expo-status-bar';
+import { scale, verticalScale } from '../../utils/styling';
+import Feather from '@expo/vector-icons/Feather';
+import { auth, db } from '../../firebaseConfig'; 
+import { onAuthStateChanged } from 'firebase/auth';
+import { doc, getDoc, collectionGroup, onSnapshot, query, orderBy } from 'firebase/firestore';
+import { BlurView } from 'expo-blur';
+import * as Location from 'expo-location';
+import Fuse from "fuse.js";
+import { useRouter } from 'expo-router';
+
+import locationManager from '../../utils/LocationManager'; 
+import { RFValue } from "react-native-responsive-fontsize";
+
+
+
+
+const { width } = Dimensions.get('window');
+const DEFAULT_BLUR_HEIGHT = 6;
+
+const calculateDistance = (lat1, lon1, lat2, lon2) => {
+  const R = 6371; // Radius of Earth in km
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLon = (lon2 - lon1) * Math.PI / 180;
+  const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+    Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c;
+};
+
+
+const getOptimizedImageUrl = (url, width) => {
+  // if (!url) return PLACEHOLDER_IMAGE;
+  if (!url) return false;
+  const parts = url.split('/upload/');
+  if (parts.length === 2) {
+    return `${parts[0]}/upload/w_${width},q_auto:best/${parts[1]}`;
+  }
+  return url;
+};
+
+
+const home = () => {
+  const router = useRouter();
+
+  const insets = useSafeAreaInsets();
+  const [userFirstName, setUserFirstName] = useState(null);
+  const [profilePictureUrl, setProfilePictureUrl] = useState(null);
+  const [searchQuery, setSearchQuery] = useState('');
+  // const [scrollY, setScrollY] = useState(0);
+  const [blurHeight, setBlurHeight] = useState(DEFAULT_BLUR_HEIGHT);
+  const scrollViewRef = useRef(null);
+
+  const [loading, setLoading] = useState(true);
+
+  // const [userLocation, setUserLocation] = useState(null);
+  // const [locationError, setLocationError] = useState(null);
+  // const locationUseCount = useRef(0);
+
+  // const { userLocation, locationError } = useLocation();
+
+  const [userLocation, setUserLocation] = useState(null);
+  const [locationError, setLocationError] = useState(null);
+
+  const [nearbyRooms, setNearbyRooms] = useState([]);
+  const [otherRooms, setOtherRooms] = useState([]);
+  const [allRooms, setAllRooms] = useState([]);
+
+  const [isLoading, setIsLoading] = useState(false);
+  const [suggestions, setSuggestions] = useState([]);
+  const debounceTimeout = useRef(null);
+
+
+  // const [keyboardVisible, setKeyboardVisible] = useState(false);
+
+  const [searchTriggered, setSearchTriggered] = useState(false);
+
+  const [searchResults, setSearchResults] = useState([]);
+
+  const handleSearch = (text) => {
+    setSearchQuery(text);
+    setIsLoading(true);
+    
+    setSuggestions([]);
+
+    if(text.trim().length > 0){
+      setSearchTriggered(false);
+    } else{
+      setSearchTriggered(true);
+      
+      setShowBottomLoading(true);
+
+      setTimeout(() => {
+        setShowBottomLoading(false);
+      }, 250);
+
+    }
+
+    if (debounceTimeout.current) clearTimeout(debounceTimeout.current);
+
+    debounceTimeout.current = setTimeout(() => {
+      
+      const allKeywords = [
+        // ...new Set(otherRooms.map(r => r.title?.toLowerCase() || '')),
+        ...new Set(otherRooms.map(r => r.place?.toLowerCase() || '')),
+      ].filter(Boolean);
+
+      const filteredSuggestions = allKeywords.filter(
+        keyword => keyword.includes(text.toLowerCase())
+      ).slice(0, 5);
+
+      setSuggestions(filteredSuggestions);
+      setIsLoading(false);
+    }, 0);
+  };
+
+  const triggerSearch = (query) => {
+    setSearchQuery(query);
+    setSuggestions([]);
+    setIsLoading(true);
+
+    if (fuse) {
+    const results = fuse.search(query);
+    // Fuse returns array like: [{ item: roomObj, refIndex: 0, score: 0.1 }]
+    const matchedRooms = results.map(r => r.item);
+    // setOtherRooms(matchedRooms);
+     setSearchResults(matchedRooms);
+  }
+
+    setTimeout(() => {
+      setIsLoading(false);
+      setSearchTriggered(true); // finally show rooms
+    }, 600); // small loading effect
+  };
+
+  const displayedOtherRooms = searchQuery ? searchResults : allRooms;
+
+
+  // const requestLocationPermission = useCallback(async () => {
+  //   if (locationUseCount.current >= 2) return;
+
+  //   try {
+  //     const { status } = await Location.requestForegroundPermissionsAsync();
+  //     if (status === 'granted') {
+  //       const location = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+  //       setUserLocation(location.coords);
+  //       console.log("Location permission granted.");
+  //       setLocationError(null);
+  //     } else {
+  //       setUserLocation({ unavailable: true });
+  //       setLocationError("Location permission denied. Using default location.");
+  //     }
+  //     locationUseCount.current += 1;
+  //   } catch (err) {
+  //     console.warn("Error getting location:", err);
+  //     setLocationError("Error getting location.");
+  //   }
+  // }, []);
+
+
+  // Request location once on mount
+  // useEffect(() => { requestLocationPermission(); }, [requestLocationPermission]);
+
+
+  // useEffect(() => {
+  //   const fetchLocation = async () => {
+  //     const { location, error } = await locationManager.requestAndGetLocation();
+  //     if (error) {
+  //       console.log("Location error:", error);
+  //     }
+  //     setUserLocation(location);
+  //   };
+
+  //   fetchLocation();
+  // }, []);
+
+
+  useEffect(() => {
+    if (allRooms.length > 0) {
+      const options = {
+        keys: ["title", "place", "roomType"], // fields you want to search
+        threshold: 0.3, // lower = strict, higher = fuzzy (0.0 exact, 1.0 super loose)
+        distance: 100, // how far letters can be apart
+        minMatchCharLength: 2, // ignore tiny words like "a", "is"
+      };
+      setFuse(new Fuse(allRooms, options));
+    }
+  }, [allRooms]);
+
+  const [fuse, setFuse] = useState(null);
+
+  
+
+  // Firestore and auth listeners
+  useEffect(() => {
+    const unsubscribeAuth = onAuthStateChanged(auth, async (user) => {
+      if (user) {
+        const userSnap = await getDoc(doc(db, 'users', user.uid));
+        if (userSnap.exists()) {
+          setSearchTriggered (true);
+          const userData = userSnap.data();
+          setUserFirstName(userData.firstName || 'User');
+          setProfilePictureUrl(userData.profileImageUrl || null);
+        } else {
+          setUserFirstName('User');
+          setProfilePictureUrl(null);
+        }
+      } else {
+        setUserFirstName('User');
+        setProfilePictureUrl(null);
+      }
+    });
+
+    const roomsCollectionRef = query(collectionGroup(db, 'rooms'), orderBy('uploadTimestamp', 'desc'));
+    const unsubscribeRooms = onSnapshot(roomsCollectionRef, (querySnapshot) => {
+      const rooms = [];
+      querySnapshot.forEach(doc => rooms.push({ id: doc.id, ...doc.data() }));
+      setAllRooms(rooms);
+      setOtherRooms(rooms);
+      setLoading(false);
+    }, (error) => {
+      console.error("Error fetching rooms: ", error);
+      setLoading(false);
+    });
+
+    const getUserLocation = async () => {
+    // This will either get the pre-fetched location or fetch it for the first time
+      const { location, error } = await locationManager.requestAndGetLocation();
+      setUserLocation(location);
+      console.log("Location granted.")
+      setLocationError(error);
+    };
+     getUserLocation();
+
+    return () => {
+      unsubscribeAuth();
+      unsubscribeRooms();
+    };
+  }, []);
+
+  // Update nearby rooms whenever location or allRooms changes
+  useEffect(() => {
+    if (!userLocation || !allRooms.length) return;
+
+    const nearby = allRooms.filter(room => {
+      if (!room.latitude || !room.longitude) return false;
+      const distance = calculateDistance(
+        userLocation.latitude,
+        userLocation.longitude,
+        room.latitude,
+        room.longitude
+      );
+      room.distance = `${distance.toFixed(1)} km away`;
+      return distance <= 2;
+    }).sort((a, b) => parseFloat(a.distance) - parseFloat(b.distance));
+
+    setNearbyRooms(nearby);
+    // setOtherRooms(allRooms);
+  }, [userLocation, allRooms]);
+
+   // Blur effect on scroll
+
+  const scrollY = useRef(new Animated.Value(0)).current;
+
+  const handleScroll = Animated.event(
+    [{ nativeEvent: { contentOffset: { y: scrollY } } }],
+    { useNativeDriver: false }
+  );
+
+  useEffect(() => {
+    const listener = scrollY.addListener(({ value }) => {
+      setBlurHeight(value > (Platform.OS === 'ios' ? 20 : 60) ? 42 : DEFAULT_BLUR_HEIGHT);
+    });
+  
+    return () => {
+      scrollY.removeListener(listener);
+    };
+  }, [])
+ 
+
+
+  const isSearching = searchQuery.length > 0;
+
+
+
+  const runFuseSearch = (rooms, query) => {
+    if (!query.trim() || !fuse) return rooms;
+
+    const results = fuse.search(query);
+    return results.map(r => r.item);
+  };
+
+  const filteredNearbyRooms = runFuseSearch(nearbyRooms, searchQuery);
+
+
+
+
+  const greetingName = userFirstName || 'User';
+
+
+  const [showBottomLoading, setShowBottomLoading] = useState(false);
+
+
+
+  return (
+    <SafeAreaProvider style= {styles.mainContainer}>
+      <StatusBar barStyle="dark-content" />
+      <View 
+        style={{ 
+          height: insets.top, 
+          // backgroundColor: '#d7ebf5', 
+          backgroundColor: '#cae6f3ff',
+          position: 'absolute', 
+          top: 0, left: 0, right: 0 
+        }} 
+      />
+      
+      <View style={[styles.container, {marginTop: insets.top}]}>
+        
+        {/* Top Section */}
+        <View style={styles.topView}>
+          <Text style={styles.titleText}>Find My Room</Text>
+          <View style={styles.greetAndImg} >
+            <Text style={styles.userGreetTxt}>Hi, {greetingName}</Text>
+            <Pressable onPress={()=> router.push('./profile') } >
+              <Image
+                source={profilePictureUrl ? { uri: profilePictureUrl } : require('../../assets/account_icon.png')}
+                style={[styles.userImage, !profilePictureUrl && styles.userImageTint]}
+              />
+            </Pressable>
+          </View>
+        </View>
+
+
+
+        {/* Blur Overlay */}
+        <BlurView 
+          intensity={Platform.OS === 'ios'? 3 : 1 } 
+          tint="light" 
+          experimentalBlurMethod="dimezisBlurView" 
+          style={[styles.blurOverlay, { height: blurHeight }]} 
+        />
+
+        {/* Scrollable Content */}
+        <Animated.ScrollView
+          style={styles.roomsContainer}
+          onScroll={handleScroll}
+          scrollEventThrottle={150}
+          ref={scrollViewRef}
+          showsVerticalScrollIndicator={false} 
+        >
+          {/* Search and Filter */}
+          <View style={{flexDirection: 'row', justifyContent: 'space-between'}}>
+            <View style={styles.searchContainer}>
+              <Feather 
+                name="search" 
+                size={Platform.OS === 'ios' ? 24 : 20} 
+                color="#00315e" 
+                style={styles.searchIcon} 
+              />
+              <TextInput
+                style={styles.searchInput}
+                placeholder="Search for a room..."
+                placeholderTextColor="#00315e"
+                value={searchQuery}
+                onChangeText={handleSearch}
+                returnKeyType="search" // Add this line
+                onSubmitEditing={() => {
+                  // Trigger search manually
+                  if (searchQuery.trim().length > 0) {
+                    triggerSearch(searchQuery);
+                    setIsLoading(true);
+                    setSuggestions([]);
+
+                    const allKeywords = [
+                      ...new Set(otherRooms.map(r => r.title?.toLowerCase() || '')),
+                      ...new Set(otherRooms.map(r => r.place?.toLowerCase() || '')),
+                    ].filter(Boolean);
+
+                    const filteredSuggestions = allKeywords.filter(
+                      keyword => keyword.includes(searchQuery.toLowerCase())
+                    ).slice(0, 0);
+
+                    setSuggestions(filteredSuggestions);
+                    setIsLoading(false);
+                  
+                  }
+                  else{
+                    setSearchTriggered (true);
+                  }
+                  setShowBottomLoading(true);
+                    setTimeout(() => {
+                    setShowBottomLoading(false);
+                  }, 350);
+                }}
+              />
+            </View>
+            <View style={styles.filterContainer}>
+
+              {isSearching ?(
+
+                // cross button
+                <Pressable 
+                onPress={() => {
+                  Keyboard.dismiss(); 
+                  setTimeout(() => {
+                    setSearchQuery('');
+                    setSuggestions([]);
+                    setIsLoading(false);
+
+                    setSearchTriggered(true);
+
+                    setShowBottomLoading(true);
+                      setTimeout(() => {
+                      setShowBottomLoading(false);
+                    },  300);
+                  }, 50);
+                }}
+                >
+                  <Image
+                    source={require('../../assets/close.png')}
+                    style={styles.closeImg}
+                  />
+                </Pressable>
+              ): (
+                <Pressable>
+                  <Image
+                    source={require('../../assets/filter_icon.png')}
+                    style={styles.filterImg}
+                  />
+                </Pressable>
+                
+              )   
+              }
+            </View>
+          </View>
+
+          {isSearching && isLoading && <ActivityIndicator size="small" color="#00315e" style={styles.loader} />}
+          {isSearching && !isLoading && suggestions.length > 0 && (
+            <View style={styles.suggestionsContainer}>
+              {suggestions.map((item, index) => (
+                <Pressable 
+                  key={index} 
+                  style={styles.suggestionItem} 
+                  onPress={() => {
+                    Keyboard.dismiss();
+                    setTimeout(() => {
+                      setSearchQuery(item);
+                      setSuggestions([]);     
+                      triggerSearch(item)
+                    
+                      setTimeout(() => {
+                        setIsLoading(false);
+                      }, 300);
+                      
+                    }, 0);
+
+                  }}
+                >
+                  <Text style={styles.suggestionText}>{item}</Text>
+                </Pressable>
+              ))}
+            </View>
+          )}
+        
+        {
+          loading ?(
+            <ActivityIndicator size='large' color='#00315e' style={{marginTop: scale(52)}} /> 
+          ) : (
+            <>
+            {showBottomLoading && (
+              <View style={{ marginTop: scale(50) }}>
+                <ActivityIndicator size="large" color="#00315e" />
+              </View>
+            )}
+            {!showBottomLoading && !isSearching && (
+            <>
+            <Text style={styles.sectionTitle}>Nearby Rooms</Text>
+            
+            {
+              locationError ?(
+                <Text style={styles.locationErrorText}>{locationError}</Text>
+              ) : !userLocation ? (
+                <Text style={styles.lodingText}>Fetching Your Location...</Text>
+              ) : (
+                <ScrollView horizontal={true} showsHorizontalScrollIndicator={false} contentContainerStyle = {styles.nearbyRooms}>
+                  {
+                    filteredNearbyRooms.length > 0 ?(
+                      filteredNearbyRooms.map (room=>(
+                        <Pressable key={room.id} style={styles.nearbyRoomCard} 
+                        onPress= {() => router.push({ pathname: './../room/details', 
+                        params: { roomId: room.id, 
+                          userId: room.userId,
+                          latitude: userLocation?.latitude,
+                          longitude: userLocation?.longitude
+                        } })
+                        } >
+                          <Image 
+                            source={{ uri: getOptimizedImageUrl(room.imageUrls && room.imageUrls.length > 0 ? room.imageUrls[0] : null, 600) }} 
+                            style={styles.nearbyRoomImage}
+                            onError={(e) => console.log('Other Room Image Load Error:', e.nativeEvent.error, 'URL:', room.imageUrls && room.imageUrls.length > 0 ? room.imageUrls[0] : 'No URL')}
+                          />
+                          {/* <Text>Bikram</Text> */}
+                          <View style={styles.nearbyRoomInfo}>
+                            <Text style={styles.nearbyRoomTitle} numberOfLines={1}>{room.title}</Text>
+                            <Text style={styles.nearbyRoomPrice}>Rs: {room.price}/month</Text>
+                            <Text style={styles.nearbyRoomType}>{room.roomType}</Text>
+                            {/* <Text style={styles.nearbyRoomDescription} numberOfLines={2}>{room.description}</Text> */}
+                            <Text style={styles.nearbyRoomDistance}>{room.distance}</Text>
+                          </View>
+                        </Pressable>
+                      ))
+                    ) : (
+                      <Text>No nearby rooms found.</Text>
+                    )
+                  }
+
+                  {/* <Text>Bikram</Text> */}
+                </ScrollView>
+              )
+            }
+            </>
+            )}
+            
+            {!showBottomLoading && searchTriggered && (
+            <>
+            <Text style={styles.sectionTitle}>
+              {/* Available Rooms */}
+              {isSearching ? `Search results for "${searchQuery}"` : 'Available Rooms'}
+              </Text>
+
+            <View style={styles.otherRoomsContainer}>
+              {displayedOtherRooms.length >0 ? (
+                 displayedOtherRooms.map (room =>(
+                  <Pressable key={room.id} style={styles.otherRoomCard} 
+                    onPress= {() => router.push({ pathname: './../room/details', 
+                    params: { roomId: room.id, 
+                      userId: room.userId,
+                      latitude: userLocation?.latitude,
+                      longitude: userLocation?.longitude
+                    } 
+                  })} 
+                  >
+
+                    <Image 
+                      source={{ uri: getOptimizedImageUrl(room.imageUrls && room.imageUrls.length > 0 ? room.imageUrls[0] : null, 600) }} 
+                      style={styles.otherRoomImage}
+                      onError={(e) => console.log('Other Room Image Load Error:', e.nativeEvent.error, 'URL:', room.imageUrls && room.imageUrls.length > 0 ? room.imageUrls[0] : 'No URL')}
+                    />
+                    <View style={styles.otherRoomInfo} >
+                      <Text style={styles.otherRoomTitle} numberOfLines={1}>{room.title}</Text>
+                      {/* <Text style={styles.otherRoomDescription} numberOfLines={2}>{room.description}</Text> */}
+                      <Text style={styles.otherRoomPrice}>Rs: {room.price}/month</Text>
+                      <Text style={styles.otherLocation} numberOfLines={1}>Location: {room.place} </Text>
+                      <Text style={styles.otherRoomType}>{room.roomType} </Text> 
+
+                    </View>
+                  </Pressable>
+                ))
+            ) : (
+              <Text style={styles.noDataText}>
+                {/* No rooms available. */}
+                {isSearching ? `No result found.` : 'No room available now.'}
+              </Text>
+            )
+              
+            }
+            </View>
+
+            </>
+            )}
+
+            </>
+          )
+        }
+
+        </Animated.ScrollView>
+        
+      </View>
+
+    </SafeAreaProvider>
+  );
+};
+
+const styles = StyleSheet.create({
+  mainContainer:{
+    // backgroundColor: '#d7e3ec80',
+    // backfaceVisibility: '#f1f5f7ff',
+    backgroundColor: '#ebf8fd6e',
+
+  },
+  container:{
+  },
+  topView: {
+    // backgroundColor: '#d7ebf5',
+    backgroundColor: '#cae6f3ff',
+    flexDirection: 'row',
+    padding: scale(4),
+    paddingBottom: scale(7.2),
+    paddingLeft: scale(10),
+    paddingRight: scale(10),
+    borderBottomRightRadius : scale(16),
+    borderBottomLeftRadius : scale(16),
+    justifyContent: 'space-between',
+    zIndex: 99,
+  },
+  titleText: {
+    color: '#00315e',
+    fontSize: Platform.OS === 'ios'
+    ? width > 400 
+    ? verticalScale(26) 
+    : verticalScale(30)    
+    : scale(22),
+    fontWeight: 'bold',
+  },
+  greetAndImg: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  userGreetTxt: {
+    marginTop: Platform.OS === 'ios'? width > 400 
+    ? scale(8) : scale(9.6) : scale(10),
+    color: '#00315e',
+    fontSize: Platform.OS === 'ios' ? verticalScale(18) : scale(14),
+    fontWeight: '700',
+  },
+  userImage: {
+    height: scale(32),
+    width: scale(32),
+    padding: 1,
+    borderRadius: 50,
+  },
+  userImageTint: {
+    tintColor: '#00315e',
+  },
+  blurOverlay: {
+    position: 'absolute',
+    top: scale(38), 
+    left: 0,
+    right: 0,
+    zIndex: 10,
+  },
+  roomsContainer: {
+    marginTop: scale(-3),
+    paddingTop: scale(10),
+    marginBottom: Platform.OS === 'ios' ? scale(40) : scale(46),
+    // backgroundColor: '#d7e3ec80',
+    // minHeight: '90%',
+    minHeight: scale (650),
+  },
+  searchContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#f3fafd85',
+    borderRadius: 8,
+    marginHorizontal: scale(10),
+    marginTop: scale(2),
+    marginRight: scale(2),
+    paddingHorizontal: scale(10),
+    paddingRight: scale(5),
+    borderColor: '#00315e61',
+    borderWidth: 0.5,
+    width: '82.4%',
+  },
+  searchIcon: {
+    marginRight: 10,
+  },
+  searchInput: {
+    flex: 1,
+    height: scale(40),
+    color: '#000',
+    tintColor: '#000',
+    fontSize: Platform.OS === 'ios' ? scale(16) : scale(14),
+  },
+  filterContainer: {
+    marginRight: scale(10), 
+    marginTop: scale(4.2), 
+    backgroundColor: '#00315e', 
+    height: scale(36), 
+    width: scale(36), 
+    alignItems: 'center', 
+    justifyContent:'center', 
+    borderRadius: 8,
+  },
+  filterImg:{
+    height: Platform.OS === 'ios' ? scale(26) : scale(26),
+    width: Platform.OS === 'ios' ? scale(26) : scale(26),
+    zIndex: 4,
+  },
+  closeImg:{
+    height: scale(16.8),
+    width: scale(16.8),
+    tintColor: '#ffffffff',
+    zIndex: 4,
+  },
+
+
+  sectionTitle: {
+    marginTop: scale(10),
+    marginHorizontal : scale(12),
+    fontSize: Platform.OS === 'ios' ? scale(18) : scale(16),
+    fontWeight: 'bold',
+    color: '#00315e',
+  },
+
+  
+  // nearby rooms
+
+  nearbyRooms: {
+    marginLeft: scale(5),
+    paddingHorizontal: scale (5),
+    marginVertical: scale(4),
+    paddingVertical: scale(8),
+    borderRadius: 8,
+    // backgroundColor: '#d4ddec70',
+    // backgroundColor: '#ebf8fd6e',
+    marginBottom: scale(8),
+  },
+
+  nearbyRoomCard: {
+    // backgroundColor: Platform.OS === 'ios' ? '#deeaf0ff' : '#deeaf0ff' ,
+    backgroundColor: '#fafafaff',
+    borderRadius: 10,
+    padding: 10,
+    paddingBottom: 6,
+    marginRight: 10,
+    width: scale(170),
+    shadowColor: '#000',
+    shadowOffset: { width: 2, height: 3},
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  nearbyRoomImage: {
+    width: '100%',
+    height: Platform.OS === 'ios' ? scale(100) : scale(90),
+    borderRadius: 8,
+    marginBottom: 5,
+  },
+  nearbyRoomInfo: {
+    flex: 1,
+    justifyContent: 'center',
+  },
+  nearbyRoomTitle: {
+    fontSize: Platform.OS === 'ios' ? scale(16) : scale(14),
+    fontWeight: 'bold',
+    color: '#00315e',
+    marginBottom: 3.2,
+  },
+  nearbyRoomPrice: {
+    fontSize: Platform.OS === 'ios' ? scale(14) : scale(12),
+    fontWeight: 'bold',
+    color: '#00315e',
+    marginBottom: 2,
+  },
+  nearbyRoomType: {
+    fontSize: Platform.OS === 'ios' ? scale(14) : scale(12),
+    color: '#00315ed5',
+    fontWeight: '600',
+  },
+  // nearbyRoomDescription: {
+  //   fontSize: Platform.OS === 'ios' ? scale(12) : scale(10),
+  //   color: '#555',
+  //   marginBottom: 2,
+  // },
+  
+  nearbyRoomDistance: {
+    fontSize: Platform.OS === 'ios' ? scale(13) : scale(10),
+    fontStyle: 'italic',
+    color: '#888',
+    marginTop: 2,
+  },
+  horizontalScrollContainer: {
+    paddingRight: scale(10),
+  },
+  locationErrorText: {
+    textAlign: 'center',
+    marginTop: 20,
+    fontSize: 14,
+    marginBottom: scale(10),
+    color: '#d9534f',
+    fontWeight: 'bold',
+  },
+
+  lodingText:{
+    textAlign: 'center',
+    marginTop: 20,
+    fontSize: 14,
+    marginBottom: scale(10),
+    color: '#323435ff',
+    fontWeight: 'bold',
+  },
+
+
+
+  // others room
+  otherRoomsContainer: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+    paddingHorizontal: scale(5),
+    marginLeft: scale(5),
+    marginRight: scale(5),
+    marginVertical: scale(8),
+  },
+  otherRoomCard: {
+    // backgroundColor: Platform.OS === 'ios' ? '#deeaf0ff' : '#deeaf0ff' ,
+    backgroundColor: '#fafafaff',
+    borderRadius: 10,
+    padding: 10,
+    marginBottom: 10,
+    width: '48%', // For two columns
+    shadowColor: '#000',
+    shadowOffset: { width: 2, height: 3 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  otherRoomImage: {
+    width: '100%',
+    height: Platform.OS === 'ios' ? scale(110) : scale(100),
+    borderRadius: 8,
+    marginBottom: 5,
+  },
+  otherRoomInfo: {
+    flex: 1,
+    justifyContent: 'center',
+  },
+  otherRoomTitle: {
+    fontSize: Platform.OS === 'ios' ? scale(16) : scale(14),
+    fontWeight: 'bold',
+    color: '#00315e',
+    marginBottom: 2,
+  },
+  // otherRoomDescription: {
+  //   fontSize: Platform.OS === 'ios' ? scale(12) : scale(10),
+  //   color: '#555',
+  //   marginBottom: 2,
+  // },
+  otherRoomPrice: {
+    fontSize: Platform.OS === 'ios' ? scale(14) : scale(12),
+    fontWeight: 'bold',
+    color: '#00315e',
+    marginBottom: 2,
+  },
+  otherLocation: {
+    fontSize: Platform.OS === 'ios' ? scale(15.4) : scale(12.6),
+    color: '#00315eda',
+    fontWeight: '600',
+    marginBottom: 2,
+  },
+  otherRoomType: {
+    fontSize: Platform.OS === 'ios' ? scale(15) : scale(12),
+    color: '#00315eda',
+    fontWeight: '600',
+    // fontStyle: 'italic',
+  },
+  
+  noDataText: {
+    textAlign: 'center',
+    marginTop: 10,
+    marginBottom: 20,
+    fontSize: 14,
+    color: '#888',
+  },
+
+  loader: {
+    marginTop: scale(10),
+    alignSelf: 'center',
+  },
+  suggestionsContainer: {
+
+    marginHorizontal: scale(10),
+    paddingHorizontal: scale(10),
+    backgroundColor: '#f3fafd85',
+    borderRadius: 8,
+    // borderWidth: 0.5,
+    // borderColor: '#00315e61',
+    padding: scale(5),
+    zIndex: 2,
+  },
+  suggestionItem: {
+    paddingVertical: scale(8),
+    paddingHorizontal: scale(10),
+    borderBottomWidth: 0.3,
+    borderBottomColor: '#beced3ff',
+  },
+  suggestionText: {
+    fontSize: Platform.OS === 'ios' ? scale(16) : scale(14),
+    color: '#00315e',
+  },
+
+
+  // buttom loading
+  bottomLoadingContainer: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: scale(20),
+    marginBottom: scale(20),
+  },
+  bottomLoadingText: {
+    marginLeft: scale(10),
+    color: '#00315e',
+    fontSize: scale(14),
+  },    
+
+});
+
+export default home;

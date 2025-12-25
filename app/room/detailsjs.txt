@@ -1,0 +1,864 @@
+import { Image, Platform, Pressable, ScrollView, StyleSheet, Text, View, Dimensions, Animated } from 'react-native';
+import React, { useState, useRef } from 'react';
+import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { StatusBar } from 'expo-status-bar';
+import { scale } from '../../utils/styling';
+import { router } from 'expo-router';
+
+const { width } = Dimensions.get('window');
+
+const details = () => {
+    const insets = useSafeAreaInsets();
+    const [activeIndex, setActiveIndex] = useState(0);
+
+    const roomImages = [
+        'https://plus.unsplash.com/premium_photo-1664474619075-644dd191935f?fm=jpg&q=60&w=3000&ixlib=rb-4.1.0&ixid=M3wxMjA3fDB8MHxzZWFyY2h8MXx8aW1hZ2V8ZW58MHx8MHx8fDA%3D',
+        'https://cdn-front.freepik.com/images/ai/image-generator/cover/image-generator-header.webp?w=3840&h=1920&q=90%203840w,%20https://cdn-front.freepik.com/images/ai/image-generator/cover/image-generator-header.webp?w=7680&h=3840&q=90%207680w',
+        'https://images.pexels.com/photos/20420396/pexels-photo-20420396.jpeg?cs=srgb&dl=pexels-lileia-mikhailova-1025464630-20420396.jpg&fm=jpg',
+        // 'https://placehold.co/400x300/e8f2f8/white?text=Room+4',
+        // 'https://placehold.co/400x300/f5f9fb/white?text=Room+5',
+    ];
+
+    const onScroll = (event) => {
+        const xOffset = event.nativeEvent.contentOffset.x;
+        const index = Math.round(xOffset / width);
+        if (index !== activeIndex) {
+            setActiveIndex(index);
+        }
+    };
+
+    return (
+        <SafeAreaProvider style={styles.container}>
+            <StatusBar barStyle="light-content" />
+            <View
+                style={{
+                    height: insets.top,
+                    backgroundColor: '#cae6f3ff',
+                    position: 'absolute',
+                    top: 0, left: 0, right: 0
+                }}
+            />
+            <View style={{ marginTop: insets.top }}></View>
+            <View style={styles.topView}>
+                <Pressable style={{ marginLeft: 10, }}
+                    onPress={() => router.back()}
+                >
+                    <Image
+                        source={require('../../assets/back.png')}
+                        style={{
+                            height: Platform.OS === 'ios' ? 24 : 20,
+                            width: Platform.OS === 'ios' ? 24 : 20,
+                            tintColor: "#00315e",
+                        }}
+                    />
+                </Pressable>
+                <Text style={styles.detailsTitle}>Room Details</Text>
+            </View>
+
+            {/* Swipable Image Section */}
+            <View>
+                <ScrollView
+                    horizontal={true}
+                    pagingEnabled={true}
+                    showsHorizontalScrollIndicator={false}
+                    onScroll={onScroll}
+                    scrollEventThrottle={16}
+                >
+                    {roomImages.map((image, index) => (
+                        <Image
+                            key={index}
+                            source={{ uri: image }}
+                            style={styles.roomImage}
+                        />
+                    ))}
+                </ScrollView>
+                <View style={styles.paginationContainer}>
+                    {roomImages.map((_, index) => (
+                        <View
+                            key={index}
+                            style={[
+                                styles.dot,
+                                { backgroundColor: index === activeIndex ? '#00315e' : 'transparent' },
+                                { borderWidth: index === activeIndex ? 0 : 1.2 },
+                                { borderColor: index === activeIndex ? '#00315e' : '#00315e' }
+                            ]}
+                        />
+                    ))}
+                </View>
+            </View>
+
+        </SafeAreaProvider>
+    );
+};
+
+export default details;
+
+const styles = StyleSheet.create({
+    container: {
+        flex: 1,
+    },
+    topView: {
+        paddingHorizontal: 10,
+        paddingTop: 8,
+        paddingBottom: 6,
+        borderBottomWidth: 0.2,
+        borderColor: 'rgba(17, 0, 0, 0.62)',
+        flexDirection: 'row',
+        gap: 86,
+        alignItems: 'center',
+        backgroundColor: '#cae6f3ff',
+    },
+    detailsTitle: {
+        fontSize: Platform.OS === 'ios' ? scale(24) : scale(18),
+        color: '#00315e',
+        fontWeight: 'bold',
+    },
+    roomImage: {
+        width: width,
+        height: 250,
+        marginTop: 1,
+    },
+    paginationContainer: {
+        flexDirection: 'row',
+        justifyContent: 'center',
+        marginTop: 10,
+    },
+    dot: {
+        width: 10,
+        height: 10,
+        borderRadius: 5,
+        marginHorizontal: 4,
+        borderWidth: 1.2,
+        borderColor: '#00315e'
+    },
+});
+
+
+
+/// new working
+
+
+
+import { 
+  Image, 
+  Platform, 
+  Pressable, 
+  ScrollView, 
+  StyleSheet, 
+  Text, 
+  View, 
+  Dimensions, 
+  ActivityIndicator 
+} from 'react-native';
+import React, { useState, useEffect } from 'react';
+import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { StatusBar } from 'expo-status-bar';
+import { scale } from '../../utils/styling';
+import { useLocalSearchParams, useRouter } from 'expo-router';
+import { doc, getDoc } from 'firebase/firestore';
+import { db } from '../../firebaseConfig'; 
+
+import { collectionGroup, query, where, getDocs, documentId } from 'firebase/firestore';
+// import { collectionGroup, query, where, getDocs } from 'firebase/firestore';
+
+const { width } = Dimensions.get('window');
+
+
+// optimize cloudinary images
+const getOptimizedImageUrl = (url, width) => {
+  if (!url) return null;
+  const parts = url.split('/upload/');
+  if (parts.length === 2) {
+    return `${parts[0]}/upload/w_${width},q_auto:best/${parts[1]}`;
+  }
+  return url;
+};
+
+const Details = () => {
+  const router = useRouter();
+  const insets = useSafeAreaInsets();
+  const { roomId, userId } = useLocalSearchParams(); // Get both IDs
+  
+  const [roomData, setRoomData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [activeIndex, setActiveIndex] = useState(0);
+  
+  useEffect(() => {
+    console.log("room id : ", roomId);
+    console.log("user id : ", userId);
+    
+    if (!roomId || !userId) {
+      console.log("No roomId or userId provided.");
+      setLoading(false);
+      return;
+    }
+
+    const fetchRoomData = async () => {
+      try {
+        // Build the correct document path using the structure: users/{userId}/rooms/{roomId}
+        const docRef = doc(db, 'roomsData', userId, 'rooms', roomId);
+        const docSnap = await getDoc(docRef);
+
+        if (docSnap.exists()) {
+          setRoomData({ id: docSnap.id, ...docSnap.data() });
+          console.log("Room data fetched:", docSnap.data());
+        } else {
+          console.log("No such document!");
+        }
+      } catch (error) {
+        console.error("Error fetching room details:", error);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchRoomData();
+  }, [roomId, userId]);
+  
+//   useEffect(() => {
+//     console.log( "room id : ", roomId);
+//   if (!roomId) {
+//     console.log("No roomId provided.");
+//     setLoading(false);
+//     return;
+//   }
+
+//   const fetchRoomData = async () => {
+//     try {
+//       // Use collectionGroup query to find the room by ID
+//        const q = query(collectionGroup(db, 'rooms'), where('__name__', '==', roomId));
+//       const querySnapshot = await getDocs(q);
+      
+//       if (!querySnapshot.empty) {
+//         querySnapshot.forEach((doc) => {
+//           setRoomData({ id: doc.id, ...doc.data() });
+//           console.log("Room data fetched:", doc.data());
+//         });
+//       } else {
+//         console.log("No such document!");
+//       }
+//     } catch (error) {
+//       console.error("Error fetching room details:", error);
+//     } finally {
+//       setLoading(false);
+//     }
+//   };
+
+//   fetchRoomData();
+// }, [roomId]);
+
+// useEffect(() => {
+//   console.log("room id : ", roomId);
+//   if (!roomId) {
+//     console.log("No roomId provided.");
+//     setLoading(false);
+//     return;
+//   }
+
+//   const fetchRoomData = async () => {
+//     try {
+//       // Use documentId() instead of '__name__'
+//       const q = query(collectionGroup(db, 'rooms'), where(documentId(), '==', roomId));
+//       const querySnapshot = await getDocs(q);
+      
+//       if (!querySnapshot.empty) {
+//         querySnapshot.forEach((doc) => {
+//           setRoomData({ id: doc.id, ...doc.data() });
+//           console.log("Room data fetched:", doc.data());
+//         });
+//       } else {
+//         console.log("No such document!");
+//       }
+//     } catch (error) {
+//       console.error("Error fetching room details:", error);
+//     } finally {
+//       setLoading(false);
+//     }
+//   };
+
+//   fetchRoomData();
+// }, [roomId]);
+
+//   useEffect(() => {
+//     if (!roomId) {
+//       console.log("No roomId provided.");
+//       setLoading(false);
+//       return;
+//     }
+
+//     const fetchRoomData = async () => {
+//       try {
+//         const docRef = doc(db, 'rooms', roomId);
+//         const docSnap = await getDoc(docRef);
+
+//         if (docSnap.exists()) {
+//           setRoomData({ id: docSnap.id, ...docSnap.data() });
+//           console.log("Room data fetched:", docSnap.data());
+//         } else {
+//           console.log("No such document!");
+//         }
+//       } catch (error) {
+//         console.error("Error fetching room details:", error);
+//       } finally {
+//         setLoading(false);
+//       }
+//     };
+
+//     fetchRoomData();
+//   }, [roomId]);
+
+  const onScroll = (event) => {
+    const xOffset = event.nativeEvent.contentOffset.x;
+    const index = Math.round(xOffset / width);
+    if (index !== activeIndex) {
+      setActiveIndex(index);
+    }
+  };
+
+  const roomImages = roomData?.imageUrls || [];
+
+  return (
+    <SafeAreaProvider style={styles.container}>
+      <StatusBar barStyle="light-content" />
+      {/* Top safe area */}
+      <View style={{ height: insets.top, backgroundColor: '#cae6f3ff', position: 'absolute', top: 0, left: 0, right: 0 }} />
+      <View style={{ marginTop: insets.top }} />
+
+      {/* Top Header */}
+      <View style={styles.topView}>
+        <Pressable style={{ marginLeft: 10 }} onPress={() => router.back()} >
+          <Image source={require('../../assets/back.png')} style={styles.backButtonImage} />
+        </Pressable>
+        <Text style={styles.detailsTitle}>Room Details</Text>
+      </View>
+
+      {/* Content */}
+      {loading ? (
+        <View style={styles.loaderContainer}>
+          <ActivityIndicator size="large" color="#00315e" />
+          <Text style={styles.loadingText}>Fetching room details...</Text>
+        </View>
+      ) : !roomData ? (
+        <View style={styles.loaderContainer}>
+          <Text style={styles.noDataText}>Room not found.</Text>
+        </View>
+      ) : (
+        <ScrollView style={styles.detailsScrollView}>
+          {/* Swipable Image Section */}
+          <View>
+            <ScrollView
+              horizontal
+              pagingEnabled
+              showsHorizontalScrollIndicator={false}
+              onScroll={onScroll}
+              scrollEventThrottle={16}
+            >
+              {roomImages.length > 0 ? (
+                roomImages.map((image, index) => (
+                  <Image 
+                    key={index} 
+                    source={{ uri: getOptimizedImageUrl(image, width) }} 
+                    style={styles.roomImage} 
+                  />
+                ))
+              ) : (
+                <View style={styles.roomImagePlaceholder}>
+                  <Text style={styles.noImageText}>No images available</Text>
+                </View>
+              )}
+            </ScrollView>
+
+            {/* Pagination Dots */}
+            <View style={styles.paginationContainer}>
+              {roomImages.map((_, index) => (
+                <View
+                  key={index}
+                  style={[
+                    styles.dot,
+                    { 
+                      backgroundColor: index === activeIndex ? '#00315e' : 'transparent', 
+                      borderWidth: index === activeIndex ? 0 : 1.2, 
+                      borderColor: '#00315e' 
+                    }
+                  ]}
+                />
+              ))}
+            </View>
+          </View>
+
+          {/* Room Info Section */}
+          <View style={styles.roomInfoSection}>
+            <Text style={styles.roomTitle}>{roomData.title}</Text>
+            <Text style={styles.roomPrice}>Rs. {roomData.price}/month</Text>
+            
+            <View style={styles.roomLocation}>
+              <Text style={{ color: '#555' }}>{roomData.place}</Text>
+            </View>
+
+            <Text style={styles.roomDescription}>{roomData.description}</Text>
+            <Text style={styles.roomType}>{roomData.roomType}</Text>
+          </View>
+        </ScrollView>
+      )}
+    </SafeAreaProvider>
+  );
+};
+
+export default Details;
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: '#ebf8fd6e',
+  },
+  topView: {
+    paddingHorizontal: 10,
+    paddingTop: 8,
+    paddingBottom: 6,
+    borderBottomWidth: 0.2,
+    borderColor: 'rgba(17, 0, 0, 0.62)',
+    flexDirection: 'row',
+    gap: 86,
+    alignItems: 'center',
+    backgroundColor: '#cae6f3ff',
+  },
+  detailsTitle: {
+    fontSize: Platform.OS === 'ios' ? scale(24) : scale(18),
+    color: '#00315e',
+    fontWeight: 'bold',
+  },
+  backButtonImage: {
+    height: Platform.OS === 'ios' ? 24 : 20,
+    width: Platform.OS === 'ios' ? 24 : 20,
+    tintColor: "#00315e",
+  },
+  roomImage: {
+    width: width,
+    height: 250,
+    marginTop: 1,
+  },
+  roomImagePlaceholder: {
+    width: width,
+    height: 250,
+    backgroundColor: '#e0e0e0',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  noImageText: {
+    fontSize: 16,
+    color: '#888',
+  },
+  paginationContainer: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    marginTop: 10,
+  },
+  dot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    marginHorizontal: 4,
+    borderWidth: 1.2,
+    borderColor: '#00315e'
+  },
+  loaderContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  loadingText: {
+    marginTop: 10,
+    fontSize: 14,
+    color: '#00315e',
+  },
+  noDataText: {
+    fontSize: 16,
+    color: '#888',
+  },
+  detailsScrollView: {
+    flex: 1,
+    backgroundColor: '#fff',
+    borderTopLeftRadius: 16,
+    borderTopRightRadius: 16,
+    marginTop: 10,
+    padding: 10,
+  },
+  roomInfoSection: {
+    padding: 10,
+    paddingBottom: 20,
+  },
+  roomTitle: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: '#00315e',
+    marginBottom: 5,
+  },
+  roomPrice: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#00315e',
+    marginBottom: 5,
+  },
+  roomLocation: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 10,
+  },
+  roomDescription: {
+    fontSize: 14,
+    color: '#333',
+    lineHeight: 20,
+    marginTop: 10,
+  },
+  roomType: {
+    fontSize: 16,
+    color: '#00315e',
+    fontWeight: 'bold',
+    marginTop: 5,
+  }
+});
+
+
+
+
+
+/// new with full scereen image
+
+
+
+
+import { Dimensions, Image, Platform, Pressable, ScrollView, StyleSheet, Text, View, ActivityIndicator, Modal } from 'react-native';
+import React, { useEffect, useState, useRef } from 'react';
+import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { StatusBar } from 'expo-status-bar';
+import { scale } from '../../utils/styling';
+import { router, useLocalSearchParams } from 'expo-router';
+
+import { doc, getDoc } from 'firebase/firestore';
+import { db } from '../../firebaseConfig'; 
+
+const { width } = Dimensions.get('window');
+
+const getOptimizedImageUrl = (url, width) => {
+    if (!url) return null;
+    const parts = url.split('/upload/');
+    if (parts.length === 2) {
+        return `${parts[0]}/upload/w_${width},q_auto:best/${parts[1]}`;
+    }
+    return url;
+};
+
+const details = () => {
+    const insets = useSafeAreaInsets();
+    const { roomId, userId } = useLocalSearchParams();
+
+    const [roomData, setRoomData] = useState(null);
+    const [loading, setLoading] = useState(true);
+    const [activeIndex, setActiveIndex] = useState(0);
+    const [modalVisible, setModalVisible] = useState(false);
+    const [selectedImageIndex, setSelectedImageIndex] = useState(0);
+
+    const scrollViewRef = useRef(null);
+
+    useEffect(() => {
+        if (!roomId || !userId) {
+            setLoading(false);
+            return;
+        }
+
+        const fetchRoomData = async () => {
+            try {
+                const docRef = doc(db, 'roomsData', userId, 'rooms', roomId);
+                const docSnap = await getDoc(docRef);
+
+                if (docSnap.exists()) {
+                    setRoomData({ id: docSnap.id, ...docSnap.data() });
+                } else {
+                    console.log("No such document!");
+                }
+            } catch (error) {
+                console.error("Error fetching room details:", error);
+            } finally {
+                setLoading(false);
+            }
+        };
+        fetchRoomData();
+    }, [roomId, userId]);
+
+    const roomImages = roomData?.imageUrls || [];
+
+    const onScroll = (event) => {
+        const xOffset = event.nativeEvent.contentOffset.x;
+        const index = Math.round(xOffset / width);
+        if (index !== activeIndex) {
+            setActiveIndex(index);
+        }
+    };
+
+    const onModalScroll = (event) => {
+        const xOffset = event.nativeEvent.contentOffset.x;
+        const index = Math.round(xOffset / width);
+        setSelectedImageIndex(index);
+    };
+    
+    // Function to handle image press
+    const handleImagePress = (index) => {
+        setSelectedImageIndex(index);
+        setModalVisible(true);
+    };
+
+    // Scroll to the selected image when the modal opens
+    useEffect(() => {
+        if (modalVisible && scrollViewRef.current) {
+            scrollViewRef.current.scrollTo({ x: selectedImageIndex * width, animated: false });
+        }
+    }, [modalVisible, selectedImageIndex]);
+
+    return (
+        <SafeAreaProvider style={styles.container}>
+            <StatusBar barStyle="light-content" />
+            <View style={{ height: insets.top, backgroundColor: '#cae6f3ff', position: 'absolute', top: 0, left: 0, right: 0 }} />
+            <View style={{ marginTop: insets.top }}></View>
+
+            <View style={styles.topView}>
+                <Pressable style={{ marginLeft: 5, }} onPress={() => router.back()}>
+                    <Image source={require('../../assets/back.png')} style={{ height: Platform.OS === 'ios' ? 24 : 20, width: Platform.OS === 'ios' ? 24 : 20, tintColor: "#00315e", paddingHorizontal: 5 }} />
+                </Pressable>
+                <Text style={styles.detailsTitle}>Room Details</Text>
+            </View>
+
+            {loading ? (
+                <View style={styles.loaderContainer}>
+                    <ActivityIndicator size="large" color="#00315e" />
+                    <Text style={styles.loadingText}>Fetching room details...</Text>
+                </View>
+            ) : !roomData ? (
+                <View style={styles.loaderContainer}>
+                    <Text style={styles.noDataText}>Room not found.</Text>
+                </View>
+            ) : (
+                <ScrollView style={styles.detailsScrollView}>
+                    <View>
+                        <ScrollView
+                            horizontal
+                            pagingEnabled
+                            showsHorizontalScrollIndicator={false}
+                            onScroll={onScroll}
+                            scrollEventThrottle={20}
+                            style={{ borderRadius: 1, borderBottomWidth: 1, borderBottomColor: '#3d3d3d1e' }}
+                        >
+                            {roomImages.length > 0 ? (
+                                roomImages.map((image, index) => (
+                                    <Pressable
+                                        key={index}
+                                        onPress={() => handleImagePress(index)}
+                                    >
+                                        <Image
+                                            source={{ uri: getOptimizedImageUrl(image, width) }}
+                                            style={styles.roomImage}
+                                        />
+                                    </Pressable>
+                                ))
+                            ) : (
+                                <View style={styles.roomImagePlaceholder}>
+                                    <Text style={styles.noImageText}>No images available</Text>
+                                </View>
+                            )}
+                        </ScrollView>
+
+                        {roomImages.length > 1 && (
+                            <View style={styles.paginationContainer}>
+                                {roomImages.map((_, index) => (
+                                    <View
+                                        key={index}
+                                        style={[
+                                            styles.dot,
+                                            {
+                                                backgroundColor: index === activeIndex ? '#fff' : '#c9c9c9ee',
+                                                borderWidth: index === activeIndex ? 0 : 1,
+                                                borderColor: '#d8d8d89c'
+                                            }
+                                        ]}
+                                    />
+                                ))}
+                            </View>
+                        )}
+                    </View>
+
+                    <View style={styles.detailedView}>
+                        <Text style={styles.roomTitle}>{roomData.title}</Text>
+                        <Text style={styles.roomPrice}>Rs: {roomData.price}/month</Text>
+                    </View>
+                </ScrollView>
+            )}
+
+            {/* Modal for full-screen image */}
+            <Modal
+                animationType="fade"
+                transparent={true}
+                visible={modalVisible}
+                onRequestClose={() => setModalVisible(false)}
+            >
+                <View style={styles.modalBackground}>
+                    {/* Top bar with close button and photo count */}
+                    <View style={[styles.modalTopBar, { top: insets.top }]}>
+                        <Pressable onPress={() => setModalVisible(false)} style={styles.closeButton}>
+                            <Image
+                                source={require('../../assets/close.png')}
+                                style={styles.closeIcon}
+                            />
+                        </Pressable>
+                        <Text style={styles.imageCountText}>
+                            {selectedImageIndex + 1} of {roomImages.length}
+                        </Text>
+                    </View>
+
+                    {/* Scrollable Images */}
+                    <ScrollView
+                        ref={scrollViewRef}
+                        horizontal
+                        pagingEnabled
+                        showsHorizontalScrollIndicator={false}
+                        onScroll={onModalScroll}
+                        scrollEventThrottle={200}
+                    >
+                        {roomImages.map((image, index) => (
+                            <Image
+                                key={index}
+                                source={{ uri: getOptimizedImageUrl(image, 1080) }}
+                                style={styles.fullScreenImage}
+                                resizeMode="contain"
+                            />
+                        ))}
+                    </ScrollView>
+                </View>
+            </Modal>
+        </SafeAreaProvider>
+    );
+};
+
+export default details;
+
+const styles = StyleSheet.create({
+    container: {
+        flex: 1,
+    },
+    topView: {
+        paddingHorizontal: 10,
+        paddingTop: 8,
+        paddingBottom: 6,
+        borderBottomWidth: 0.2,
+        borderColor: 'rgba(17, 0, 0, 0.62)',
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: '#cae6f3ff',
+    },
+    detailsTitle: {
+        fontSize: Platform.OS === 'ios' ? scale(24) : scale(18),
+        color: '#00315e',
+        fontWeight: 'bold',
+        marginLeft: 10,
+    },
+    roomImage: {
+        width: width,
+        height: 360,
+    },
+    roomImagePlaceholder: {
+        width: width,
+        height: 250,
+        backgroundColor: '#e0e0e0',
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    noImageText: {
+        fontSize: 16,
+        color: '#888',
+    },
+    paginationContainer: {
+        flexDirection: 'row',
+        alignSelf: 'center',
+        borderRadius: 18,
+        marginTop: -24,
+        backgroundColor: '#3a393959',
+        padding: 4,
+    },
+    dot: {
+        width: 6.4,
+        height: 6.4,
+        borderRadius: 5,
+        marginHorizontal: 2,
+        marginVertical: 2,
+        borderWidth: 1.2,
+        borderColor: '#fff',
+    },
+    loaderContainer: {
+        flex: 1,
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    loadingText: {
+        marginTop: 10,
+        fontSize: 14,
+        color: '#00315e',
+    },
+    noDataText: {
+        fontSize: 16,
+        color: '#888',
+    },
+    detailsScrollView: {
+        backgroundColor: '#fff',
+    },
+    detailedView: {
+        marginTop: scale(18),
+        paddingHorizontal: 10,
+    },
+    roomTitle: {
+        fontSize: Platform.OS === 'ios' ? scale(24) : scale(18),
+        fontWeight: '700',
+        color: '#00315e',
+        marginBottom: 4,
+    },
+    roomPrice: {
+        fontSize: Platform.OS === 'ios' ? scale(18) : scale(13.4),
+        fontWeight: '500',
+        color: Platform.OS === 'ios' ? '#031e38ff' : '#061727ff',
+        marginLeft: 1,
+    },
+    modalBackground: {
+        flex: 1,
+        backgroundColor: '#000',
+        justifyContent: 'center',
+    },
+    modalTopBar: {
+        position: 'absolute',
+        top: 0,
+        left: 0,
+        right: 0,
+        zIndex: 1,
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        paddingHorizontal: 20,
+        paddingVertical: 10,
+        backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    },
+    imageCountText: {
+        color: '#fff',
+        fontSize: 16,
+        fontWeight: 'bold',
+    },
+    fullScreenImage: {
+        width: width, // The width must be the screen width for pagingEnabled to work
+        height: '100%',
+        maxHeight: Dimensions.get('window').height - 160,
+        marginTop: 100,
+    },
+    closeButton: {
+        padding: 5,
+    },
+    closeIcon: {
+        width: 24,
+        height: 24,
+        tintColor: '#fff',
+    },
+});
